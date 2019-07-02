@@ -2,20 +2,14 @@
 #include "spike.h"
 #include "common_header.h"
 #include <boost/program_options.hpp>
+#include <xtensor/xarray.hpp>
+#include <xtensor/xadapt.hpp>
+#include <xtensor/xnpy.hpp>
 using namespace std;
 namespace po = boost::program_options;
 
 int myrandom(int i) {return rand()%i;}
 
-// arguments:
-//
-// argv[1] = path of the raster data file;
-// argv[2] = path of output raster file;
-// argv[3] = index of target neuron;
-// argv[4] = time range of spikes;
-// argv[5] = binning size of binary time series of spike train;
-// argv[6] = shuffle flag;
-//
 int main(int argc, const char* argv[]) {
 	clock_t start, finish;
 	start = clock();
@@ -28,7 +22,7 @@ int main(int argc, const char* argv[]) {
 		// input files
 		("ifile,i", po::value<string>(), "[positional] : input data files")
 		// output file
-		("ofile,o", po::value<string>(), "[positional] : output TDMI file")
+		("ofile,o", po::value<string>(), "[positional] : output TDMI file, as numpy *.npy format")
 		// index of spike
 		("index,I", po::value<int>(), "index of target spike train")
 		// time range
@@ -69,8 +63,16 @@ int main(int argc, const char* argv[]) {
 		srand(unsigned(time(0)));
 		random_shuffle(binary_spikes.begin(), binary_spikes.end(), myrandom);
 	}
+	// convert vector<bool> to xarray<bool>;
+	vector<size_t> shape = {binary_spikes.size()};
+	xt::xarray<bool, xt::layout_type::row_major> x_binary_spikes(shape);
+	for (int i = 0; i < binary_spikes.size(); i ++) {
+		if (binary_spikes[i]) x_binary_spikes(i) = true;
+		else x_binary_spikes(i) = false;
+	}
   // Output spike train;
-  Print1DBin(dir + ofilename, binary_spikes, "trunc");
+	xt::dump_npy(dir + ofilename, x_binary_spikes);
+  //Print1DBin(dir + ofilename, binary_spikes, "trunc");
 	finish = clock();
 	// Time counting:
 	cout << "[-] spike generation takes " << (finish - start)*1.0 / CLOCKS_PER_SEC << "s" << endl;
