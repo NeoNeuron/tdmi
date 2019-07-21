@@ -6,6 +6,9 @@
 //***************
 #include "io.h"
 #include "lfp.h"
+#include <xtensor/xarray.hpp>
+#include <xtensor/xadapt.hpp>
+#include <xtensor/xnpy.hpp>
 using namespace std;
 
 //	Function of calculating LFP with point current source model in 1-D loop network case;
@@ -49,7 +52,7 @@ int main(int argc, const char* argv[]) {
 		// [network]
 		("network.size", po::value<int>(), "number of neurons")
 		("network.isspatial", po::value<bool>(), "spatial structure: true for spatially weighted, otherwise not;")
-		("network.path", po::value<string>(), "path of coordinates file")
+		("network.file", po::value<string>(), "path of coordinates file")
 		// [time]
 		("time.tmin", po::value<double>(), "lower bound of time range")
 		("time.tmax", po::value<double>(), "upper bound of time range")
@@ -97,7 +100,10 @@ int main(int argc, const char* argv[]) {
 	CalculateLFP(dir, vm, lfp, list, LFP_type, spatial_weights, t_range, vm["time.dt"].as<double>());
 
 	//	Output lfp:
-	Print1DBin(dir + ofilename, lfp, "trunc");
+	vector<size_t> shape = {lfp.size()};
+	auto x_lfp = xt::adapt(lfp, shape);
+	xt::dump_npy(dir + ofilename, x_lfp);
+	//Print1DBin(dir + ofilename, lfp, "trunc");
 	finish = clock();
 	// counting time;
 	printf("[-] LFP generation : %3.3f s\n", (finish - start)*1.0 / CLOCKS_PER_SEC);
