@@ -9,10 +9,6 @@
 #include "common_header.h"
 using namespace std;
 
-bool comp(const int x, const int y) {
-  return x < y;
-}
-
 inline double L2(vector<double>& a, vector<double>& b) {
   return sqrt((a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1]));
 }
@@ -41,7 +37,7 @@ void CalculateSpatialWeight(po::variables_map &vm, vector<double> &spatial_weigh
         spatial_weights[i] = 1.0 / distance / distance;
       }
     } else {
-      cout << "Not proper decay order\n";
+      throw invalid_argument("Invalid decay order option");
     }
   }
   return;
@@ -76,19 +72,14 @@ void CalculateLFP(string dir, po::variables_map &vm, vector<double>
   vector<double> buffer_vec;
   if (t_begin == 0) buffer_vec.resize(shape[1]);
   else buffer_vec.resize(t_begin*shape[1]);
-  // Preparing diff_list:
+  // Sort neuron list and preparing diff_list:
+  sort(neuron_list.begin(), neuron_list.end(), less<int>());
+  vector<int> neuron_list_new = {-1, shape[1]};
+  neuron_list_new.insert(neuron_list_new.begin()+1, neuron_list.begin(), neuron_list.end());
   vector<int> diff_list(neuron_list.size() + 1);
-  // Sort neuron list:
-  if (neuron_list.size() == 1) {
-    diff_list[0] = neuron_list[0];
-    diff_list[1] = shape[1] - neuron_list[0] - 1;
-  } else {
-    sort(neuron_list.begin(), neuron_list.end(), comp);
-    for (int i = 0; i < diff_list.size(); i ++) {
-      if (i == 0) diff_list[i] = neuron_list[0];
-      else if (i == diff_list.size() - 1) diff_list[i] = shape[1] - neuron_list[i - 1] - 1;
-      else diff_list[i] = neuron_list[i] - neuron_list[i - 1] - 1;
-    }
+  int size_of_dtype = sizeof(double);
+  for (int i = 0; i < diff_list.size(); i ++) {
+    diff_list[i] = size_of_dtype*(neuron_list_new[i+1] - neuron_list_new[i] - 1);
   }
 
   // Classify the LFP type and load other dym data file;
@@ -99,95 +90,80 @@ void CalculateLFP(string dir, po::variables_map &vm, vector<double>
     GI_file.read((char*)buffer_vec.data(), 2*sizeof(size_t));
 
     // For t = [0, t_begin];
-    V_file.read((char*)buffer_vec.data(), shape[1]*t_begin*sizeof(double));
-    GE_file.read((char*)buffer_vec.data(), shape[1]*t_begin*sizeof(double));
-    GI_file.read((char*)buffer_vec.data(), shape[1]*t_begin*sizeof(double));
+    V_file.read((char*)buffer_vec.data(), shape[1]*t_begin*size_of_dtype);
+    GE_file.read((char*)buffer_vec.data(), shape[1]*t_begin*size_of_dtype);
+    GI_file.read((char*)buffer_vec.data(), shape[1]*t_begin*size_of_dtype);
     // For t = (t_begin, t_end]
     double dym_val[3] = {0.0, 0.0, 0.0};
     double temp_lfp;
     for (size_t i = t_begin; i < t_end; i++) {
       temp_lfp = 0;
-      if (neuron_list.size() == shape[1]) {
-        for (int j = 0; j < neuron_list.size(); j ++) {
-          V_file.read((char*)&dym_val[0], sizeof(double));
-          GE_file.read((char*)&dym_val[1], sizeof(double));
-          GI_file.read((char*)&dym_val[2], sizeof(double));
-          temp_lfp += (- g_m * (dym_val[v_id] - V_rest) - dym_val[ge_id] * (dym_val[v_id] - V_e) - dym_val[gi_id] * (dym_val[v_id] - V_i)) * spatial_weights[j];
+      for (int j = 0; j < diff_list.size() - 1; j ++) {
+        if (diff_list[j] != 0) {
+          V_file.read((char*)buffer_vec.data(),  diff_list[j]);
+          GE_file.read((char*)buffer_vec.data(), diff_list[j]);
+          GI_file.read((char*)buffer_vec.data(), diff_list[j]);
         }
-        lfp[i - t_begin] = temp_lfp / neuron_list.size();
-      } else {
-        for (int j = 0; j < diff_list.size() - 1; j ++) {
-          V_file.read((char*)buffer_vec.data(), diff_list[j]*sizeof(double));
-          GE_file.read((char*)buffer_vec.data(), diff_list[j]*sizeof(double));
-          GI_file.read((char*)buffer_vec.data(), diff_list[j]*sizeof(double));
-          V_file.read((char*)&dym_val[0], sizeof(double));
-          GE_file.read((char*)&dym_val[1], sizeof(double));
-          GI_file.read((char*)&dym_val[2], sizeof(double));
-          temp_lfp += (- g_m * (dym_val[v_id] - V_rest) - dym_val[ge_id] * (dym_val[v_id] - V_e) - dym_val[gi_id] * (dym_val[v_id] - V_i)) * spatial_weights[j];
-        }
-        V_file.read((char*)buffer_vec.data(), *(diff_list.end() - 1)*sizeof(double));
-        GE_file.read((char*)buffer_vec.data(), *(diff_list.end() - 1)*sizeof(double));
-        GI_file.read((char*)buffer_vec.data(), *(diff_list.end() - 1)*sizeof(double));
-        lfp[i - t_begin] = temp_lfp / neuron_list.size();
+        V_file.read((char*)&dym_val[v_id], size_of_dtype);
+        GE_file.read((char*)&dym_val[ge_id], size_of_dtype);
+        GI_file.read((char*)&dym_val[gi_id], size_of_dtype);
+        temp_lfp += (- g_m * (dym_val[v_id] - V_rest) - dym_val[ge_id] * (dym_val[v_id] - V_e) - dym_val[gi_id] * (dym_val[v_id] - V_i)) * spatial_weights[j];
       }
+      if (diff_list.back() != 0) {
+        V_file.read((char*)buffer_vec.data(),  diff_list.back());
+        GE_file.read((char*)buffer_vec.data(), diff_list.back());
+        GI_file.read((char*)buffer_vec.data(), diff_list.back());
+      }
+      lfp[i - t_begin] = temp_lfp / neuron_list.size();
     }
     GE_file.close();
     GI_file.close();
   } else if (LFP_type == "lek") {
     // For t = [0, t_begin];
-    V_file.read((char*)buffer_vec.data(), shape[1]*t_begin*sizeof(double));
+    V_file.read((char*)buffer_vec.data(), shape[1]*t_begin*size_of_dtype);
     // For t = (t_begin, t_end]
     double dym_val[3] = {0.0, 0.0, 0.0};
     double temp_lfp;
     for (size_t i = t_begin; i < t_end; i++) {
       temp_lfp = 0;
-      if (neuron_list.size() == shape[1]) {
-        for (int j = 0; j < neuron_list.size(); j ++) {
-          V_file.read((char*)&dym_val[0], sizeof(double));
-          temp_lfp += (- g_m * (dym_val[v_id] - V_rest)) * spatial_weights[j];
+      for (int j = 0; j < diff_list.size() - 1; j ++) {
+        if (diff_list[j] != 0) {
+          V_file.read((char*)buffer_vec.data(), diff_list[j]);
         }
-        lfp[i - t_begin] = temp_lfp / neuron_list.size();
-      } else {
-        for (int j = 0; j < diff_list.size() - 1; j ++) {
-          V_file.read((char*)buffer_vec.data(), diff_list[j]*sizeof(double));
-          V_file.read((char*)&dym_val[0], sizeof(double));
-          temp_lfp += (- g_m * (dym_val[v_id] - V_rest)) * spatial_weights[j];
-        }
-        V_file.read((char*)buffer_vec.data(), *(diff_list.end() - 1)*sizeof(double));
-        lfp[i - t_begin] = temp_lfp / neuron_list.size();
+        V_file.read((char*)&dym_val[v_id], size_of_dtype);
+        temp_lfp += (- g_m * (dym_val[v_id] - V_rest)) * spatial_weights[j];
       }
+      if (diff_list.back() != 0) {
+        V_file.read((char*)buffer_vec.data(), diff_list.back());
+      }
+      lfp[i - t_begin] = temp_lfp / neuron_list.size();
     }
   } else if (LFP_type == "exi") {
     GE_file.open(dir + "/GE.bin", ios::binary);
     GE_file.read((char*)buffer_vec.data(), 2*sizeof(size_t));
 
     // For t = [0, t_begin];
-    V_file.read((char*)buffer_vec.data(), shape[1]*t_begin*sizeof(double));
-    GE_file.read((char*)buffer_vec.data(), shape[1]*t_begin*sizeof(double));
+    V_file.read((char*)buffer_vec.data(), shape[1]*t_begin*size_of_dtype);
+    GE_file.read((char*)buffer_vec.data(), shape[1]*t_begin*size_of_dtype);
     // For t = (t_begin, t_end]
     double dym_val[3] = {0.0, 0.0, 0.0};
     double temp_lfp;
     for (size_t i = t_begin; i < t_end; i++) {
       temp_lfp = 0;
-      if (neuron_list.size() == shape[1]) {
-        for (int j = 0; j < neuron_list.size(); j ++) {
-          V_file.read((char*)&dym_val[0], sizeof(double));
-          GE_file.read((char*)&dym_val[1], sizeof(double));
-          temp_lfp += (- dym_val[ge_id] * (dym_val[v_id] - V_e)) * spatial_weights[j];
+      for (int j = 0; j < diff_list.size() - 1; j ++) {
+        if (diff_list[j] != 0) {
+          V_file.read((char*)buffer_vec.data(),  diff_list[j]);
+          GE_file.read((char*)buffer_vec.data(), diff_list[j]);
         }
-        lfp[i - t_begin] = temp_lfp / neuron_list.size();
-      } else {
-        for (int j = 0; j < diff_list.size() - 1; j ++) {
-          V_file.read((char*)buffer_vec.data(), diff_list[j]*sizeof(double));
-          GE_file.read((char*)buffer_vec.data(), diff_list[j]*sizeof(double));
-          V_file.read((char*)&dym_val[0], sizeof(double));
-          GE_file.read((char*)&dym_val[1], sizeof(double));
-          temp_lfp += (- dym_val[ge_id] * (dym_val[v_id] - V_e)) * spatial_weights[j];
-        }
-        V_file.read((char*)buffer_vec.data(), *(diff_list.end() - 1)*sizeof(double));
-        GE_file.read((char*)buffer_vec.data(), *(diff_list.end() - 1)*sizeof(double));
-        lfp[i - t_begin] = temp_lfp / neuron_list.size();
+        V_file.read((char*)&dym_val[v_id], size_of_dtype);
+        GE_file.read((char*)&dym_val[ge_id], size_of_dtype);
+        temp_lfp += (- dym_val[ge_id] * (dym_val[v_id] - V_e)) * spatial_weights[j];
       }
+      if (diff_list.back() != 0) {
+        V_file.read((char*)buffer_vec.data(),  diff_list.back());
+        GE_file.read((char*)buffer_vec.data(), diff_list.back());
+      }
+      lfp[i - t_begin] = temp_lfp / neuron_list.size();
     }
     GE_file.close();
   } else if (LFP_type == "inh") {
@@ -195,34 +171,30 @@ void CalculateLFP(string dir, po::variables_map &vm, vector<double>
     GI_file.read((char*)buffer_vec.data(), 2*sizeof(size_t));
 
     // For t = [0, t_begin];
-    V_file.read((char*)buffer_vec.data(), shape[1]*t_begin*sizeof(double));
-    GI_file.read((char*)buffer_vec.data(), shape[1]*t_begin*sizeof(double));
+    V_file.read((char*)buffer_vec.data(), shape[1]*t_begin*size_of_dtype);
+    GI_file.read((char*)buffer_vec.data(), shape[1]*t_begin*size_of_dtype);
     // For t = (t_begin, t_end]
     double dym_val[3] = {0.0, 0.0, 0.0};
     double temp_lfp;
     for (size_t i = t_begin; i < t_end; i++) {
       temp_lfp = 0;
-      if (neuron_list.size() == shape[1]) {
-        for (int j = 0; j < neuron_list.size(); j ++) {
-          V_file.read((char*)&dym_val[0], sizeof(double));
-          GI_file.read((char*)&dym_val[2], sizeof(double));
-          temp_lfp += (- dym_val[gi_id] * (dym_val[v_id] - V_i)) * spatial_weights[j];
+      for (int j = 0; j < diff_list.size() - 1; j ++) {
+        if (diff_list[j] != 0) {
+          V_file.read((char*)buffer_vec.data(),  diff_list[j]);
+          GI_file.read((char*)buffer_vec.data(), diff_list[j]);
         }
-        lfp[i - t_begin] = temp_lfp / neuron_list.size();
-      } else {
-        for (int j = 0; j < diff_list.size() - 1; j ++) {
-          V_file.read((char*)buffer_vec.data(), diff_list[j]*sizeof(double));
-          GI_file.read((char*)buffer_vec.data(), diff_list[j]*sizeof(double));
-          V_file.read((char*)&dym_val[0], sizeof(double));
-          GI_file.read((char*)&dym_val[2], sizeof(double));
-          temp_lfp += (- dym_val[gi_id] * (dym_val[v_id] - V_i)) * spatial_weights[j];
-        }
-        V_file.read((char*)buffer_vec.data(), *(diff_list.end() - 1)*sizeof(double));
-        GI_file.read((char*)buffer_vec.data(), *(diff_list.end() - 1)*sizeof(double));
-        lfp[i - t_begin] = temp_lfp / neuron_list.size();
+        V_file.read((char*)&dym_val[v_id], size_of_dtype);
+        GI_file.read((char*)&dym_val[gi_id], size_of_dtype);
+        temp_lfp += (- dym_val[gi_id] * (dym_val[v_id] - V_i)) * spatial_weights[j];
       }
+      if (diff_list.back() != 0) {
+        V_file.read((char*)buffer_vec.data(),  diff_list.back());
+        GI_file.read((char*)buffer_vec.data(), diff_list.back());
+      }
+      lfp[i - t_begin] = temp_lfp / neuron_list.size();
     }
     GI_file.close();
-  } else throw runtime_error("ERROR: wrong LFP type (Accessible types: tot, lek, exi, inh.)");
+  } else throw invalid_argument("ERROR: wrong LFP type (Accessible types: tot, lek, exi, inh.)");
   V_file.close();
+  return ;
 }

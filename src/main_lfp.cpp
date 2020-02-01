@@ -71,8 +71,7 @@ int main(int argc, const char* argv[]) {
   if (vm.count("config-file")) {
     config_file.open(vm["config-file"].as<string>().c_str());
   } else {
-    cout << "ERROR : lack of config_file\n";
-    return -1;
+    throw invalid_argument("Missing config_file");
   }
   po::store(po::parse_config_file(config_file, config), vm);
   po::notify(vm);
@@ -92,8 +91,14 @@ int main(int argc, const char* argv[]) {
   fflush(stdout);
 
   // Calculate the spatial weights
+  clock_t t_start, t_finish;
+  t_start = clock();
   vector<double> spatial_weights;
   CalculateSpatialWeight(vm, spatial_weights);
+  t_finish = clock();
+  if (verbose) {
+    printf("[-] Spatial weight generation : %3.3e s\n", (t_finish - t_start)*1.0 / CLOCKS_PER_SEC);
+  }
 
   //  Choose objective time range;
   double t_range[2]; // t_range[0] = t_min; t_range[1] = t_max;
