@@ -1,41 +1,42 @@
 // ***************
 //  Copyright: Kyle Chen
 //  Author: Kyle Chen
-//  Date: 2019-04-06
+//  Created: 2019-04-06
 //  Description: main file for lfp.h and lfp.cpp
 //***************
 #include "io.h"
 #include "lfp.h"
-#include <xtensor/xarray.hpp>
-#include <xtensor/xadapt.hpp>
-#include <xtensor/xnpy.hpp>
+#include <random>
+#include <chrono>
+#include "cnpy.h"
 using namespace std;
 
 //  Function of calculating LFP with point current source model in 1-D loop network case;
 int main(int argc, const char* argv[]) {
-  clock_t start, finish;
-  start = clock();
   // Config program options:
   bool verbose, shuffle_flag;
-  po::options_description desc("All Options");
-  desc.add_options()
+  po::options_description generic("All Options");
+  generic.add_options()
     ("help,h", "show help message")
     ("verbose,v", po::bool_switch(&verbose), "enable verbose")
+    ;
+  po::options_description io_config;
+  io_config.add_options()
     ("prefix", po::value<string>()->default_value("./"), "prefix of output files")
-    ("config-file,c", po::value<string>(), "[positional] : config file")
+    ("config,c", po::value<string>(), "config file")
     // output file
     ("ofile,o", po::value<string>(), "[positional] : output LFP file, as numpy *.npy format")
     ("shuffle-flag,f", po::bool_switch(&shuffle_flag), "flag for random shuffle")
+    ("shuffle-seed", po::value<int>(), "random seed for random shuffle, optional")
     ;
   po::positional_options_description pos_desc;
-  pos_desc.add("config-file", 1);
   pos_desc.add("ofile", 1);
   po::variables_map vm;
-  po::store(po::command_line_parser(argc, argv).options(desc).positional(pos_desc).run(), vm);
-  po::notify(vm);
+  //po::store(po::command_line_parser(argc, argv).options(desc).positional(pos_desc).run(), vm);
+  //po::notify(vm);
 
-  po::options_description config("Configs");
-  config.add_options()
+  po::options_description model_config("Configs");
+  model_config.add_options()
     // [electrode]
     ("electrode.x", po::value<double>(), "X coordinates of electrode")
     ("electrode.y", po::value<double>(), "Y coordinates of electrode")
@@ -60,21 +61,27 @@ int main(int argc, const char* argv[]) {
     ("time.tmax", po::value<double>(), "upper bound of time range")
     ("time.dt",   po::value<double>(), "size of time step")
     ;
+  po::options_description cml_options, config_options;
+  cml_options.add(generic).add(io_config).add(model_config);
+  config_options.add(model_config);
+  po::store(po::command_line_parser(argc, argv).options(cml_options).positional(pos_desc).run(), vm);
+//  po::store(po::command_line_parser(argc, argv).options(config).run(), vm);
+  po::notify(vm);
   if (vm.count("help")) {
-    printf("Usage: cal-lfp [-c option_argument] config-file ofile\n");
-    cout << desc << '\n';
-    cout << config << '\n';
+    printf("Usage: cal-lfp [-c option_argument] config ofile\n");
+    cout << generic << '\n';
+    cout << io_config << '\n';
+    cout << model_config << '\n';
     return 1;
   }
   // Loading config.ini:
   ifstream config_file;
-  if (vm.count("config-file")) {
-    config_file.open(vm["config-file"].as<string>().c_str());
-  } else {
-    throw invalid_argument("Missing config_file");
+  if (vm.count("config")) {
+    config_file.open(vm["config"].as<string>().c_str());
+    po::store(po::parse_config_file(config_file, cml_options), vm);
+    po::notify(vm);
+    config_file.close();
   }
-  po::store(po::parse_config_file(config_file, config), vm);
-  po::notify(vm);
   if (verbose) {
     cout << ">> Configs loaded.\n";
   }
@@ -91,13 +98,14 @@ int main(int argc, const char* argv[]) {
   fflush(stdout);
 
   // Calculate the spatial weights
-  clock_t t_start, t_finish;
-  t_start = clock();
+  auto start = chrono::system_clock::now();
   vector<double> spatial_weights;
   CalculateSpatialWeight(vm, spatial_weights);
-  t_finish = clock();
+  auto finish = chrono::system_clock::now();
+  chrono::duration<double> escaped_seconds;
   if (verbose) {
-    printf("[-] Spatial weight generation : %3.3e s\n", (t_finish - t_start)*1.0 / CLOCKS_PER_SEC);
+    escaped_seconds = finish - start;
+    printf("[-] Spatial weight generation : %3.3e s\n", escaped_seconds.count());
   }
 
   //  Choose objective time range;
@@ -110,26 +118,29 @@ int main(int argc, const char* argv[]) {
   fflush(stdout);
 
   // Processing LFP data;
+  start = chrono::system_clock::now();
   vector<double> lfp;
   string LFP_type = vm["LFP.type"].as<string>();
   CalculateLFP(dir, vm, lfp, list, LFP_type, spatial_weights, t_range, vm["time.dt"].as<double>());
 
+  finish = chrono::system_clock::now();
   // shuffle flag;
-  // TODO: set random seed
   if (shuffle_flag) {
-    random_device rd;
-    mt19937 g(rd());
+    mt19937 g;
+    if (vm.count("shuffle-seed")) {
+      g.seed(vm["shuffle-seed"].as<int>());
+    } else {
+      random_device rd;
+      g.seed(rd());
+    }
     shuffle(lfp.begin(), lfp.end(), g);
   }
   //  Output lfp:
-  vector<size_t> shape = {lfp.size()};
-  auto x_lfp = xt::adapt(lfp, shape);
-  xt::dump_npy(dir + ofilename, x_lfp);
-  //Print1DBin(dir + ofilename, lfp, "trunc");
-  finish = clock();
+  cnpy::npy_save(dir+ofilename, &lfp[0], {lfp.size()},"w");
   // counting time;
   if (verbose) {
-    printf("[-] LFP generation : %3.3f s\n", (finish - start)*1.0 / CLOCKS_PER_SEC);
+    escaped_seconds = finish - start;
+    printf("[-] LFP generation : %3.3f s\n", escaped_seconds.count());
   }
   return 0;
 }
