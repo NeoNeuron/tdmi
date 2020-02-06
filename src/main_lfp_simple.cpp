@@ -6,9 +6,7 @@
 //***************
 #include "io.h"
 #include "lfp.h"
-#include <xtensor/xarray.hpp>
-#include <xtensor/xadapt.hpp>
-#include <xtensor/xnpy.hpp>
+#include "cnpy.h"
 using namespace std;
 
 //  Function of calculating LFP with point current source model in 1-D loop network case;
@@ -22,12 +20,12 @@ int main(int argc, const char* argv[]) {
     ("help,h", "show help message")
     ("verbose,v", po::bool_switch(&verbose), "enable verbose")
     ("prefix", po::value<string>()->default_value("./"), "prefix of output files")
-    ("config-file,c", po::value<string>(), "[positional] : config file")
+    ("config,c", po::value<string>(), "[positional] : config file")
     ("ofile,o", po::value<string>(), "[positional] : output LFP file")
     ("index,I", po::value<vector<int> >()->multitoken(), "[positional] : index(indices) of target neurons")
     ;
   po::positional_options_description pos_desc;
-  pos_desc.add("config-file", 1);
+  pos_desc.add("config", 1);
   pos_desc.add("ofile", 1);
   pos_desc.add("index", -1);
   po::variables_map vm;
@@ -61,17 +59,17 @@ int main(int argc, const char* argv[]) {
     ("time.dt",   po::value<double>(), "size of time step")
     ;
   if (vm.count("help")) {
-    printf("Usage: cal-lfp-simple [-c option_argument] config-file ofile index[id1, id2, ...]\n");
+    printf("Usage: cal-lfp-simple [-c option_argument] config ofile index[id1, id2, ...]\n");
     cout << desc << '\n';
     cout << config << '\n';
     return 1;
   }
   // Loading config.ini:
   ifstream config_file;
-  if (vm.count("config-file")) {
-    config_file.open(vm["config-file"].as<string>().c_str());
+  if (vm.count("config")) {
+    config_file.open(vm["config"].as<string>().c_str());
   } else {
-    cout << "ERROR : lack of config_file\n";
+    cout << "ERROR : lack of config file\n";
     return -1;
   }
   po::store(po::parse_config_file(config_file, config), vm);
@@ -108,10 +106,7 @@ int main(int argc, const char* argv[]) {
   CalculateLFP(dir, vm, lfp, list, LFP_type, spatial_weights, t_range, vm["time.dt"].as<double>());
 
   //  Output lfp:
-  vector<size_t> shape = {lfp.size()};
-  auto x_lfp = xt::adapt(lfp, shape);
-  xt::dump_npy(dir + ofilename, x_lfp);
-  //Print1DBin(dir + ofilename, lfp, "trunc");
+  cnpy::npy_save(dir+ofilename, &lfp[0], {lfp.size()},"w");
   finish = clock();
   // counting time;
   if (verbose) {

@@ -6,7 +6,6 @@
 //***************
 #include "lfp.h"
 #include "io.h"
-#include "common_header.h"
 using namespace std;
 
 inline double L2(vector<double>& a, vector<double>& b) {
